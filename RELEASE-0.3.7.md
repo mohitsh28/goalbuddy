@@ -1,5 +1,7 @@
 # GoalBuddy 0.3.7: Goalmaxxed
 
+![GoalBuddy v0.3.7 release: Goalmaxxed.](https://raw.githubusercontent.com/tolibear/goalbuddy/v0.3.7/internal/assets/goalbuddy-v0.3.7-release.png)
+
 Release date: 2026-05-19
 
 Goalmaxxed is the release where GoalBuddy stops trying to become a workflow catalog and commits to one sharper job:

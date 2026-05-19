@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://goalbuddy.dev">
-    <img src="internal/assets/goalbuddy-v0.3.5-release.png" alt="GoalBuddy v0.3.5 release: Subgoals, parallel agents, and dark mode." width="100%">
+    <img src="internal/assets/goalbuddy-v0.3.7-release.png" alt="GoalBuddy v0.3.7 release: Goalmaxxed." width="100%">
   </a>
 </p>
 
