@@ -49,6 +49,7 @@ const optionsWithValues = new Set([
   "--task",
   "--board",
 ]);
+const pathOptions = new Set(["--board", "--goal"]);
 
 const args = process.argv.slice(2);
 const command = args[0] === "--help" || args[0] === "-h"
@@ -191,6 +192,35 @@ function positionalArgs() {
     values.push(arg);
   }
   return values;
+}
+
+/**
+ * Resolve goal-related paths in raw args to absolute paths.
+ * Child processes spawned with cwd=packageRoot cannot resolve
+ * relative goal paths from the user's working directory.
+ */
+function resolveChildGoalArgs(rawArgs) {
+  const out = [];
+  let resolveNext = false;
+  for (const arg of rawArgs) {
+    if (resolveNext) {
+      out.push(resolve(arg));
+      resolveNext = false;
+      continue;
+    }
+    const joinedMatch = [...pathOptions].find((opt) => arg.startsWith(opt + "="));
+    if (joinedMatch) {
+      out.push(joinedMatch + "=" + resolve(arg.slice(joinedMatch.length + 1)));
+    } else if (pathOptions.has(arg)) {
+      out.push(arg);
+      resolveNext = true;
+    } else if (!arg.startsWith("-")) {
+      out.push(resolve(arg));
+    } else {
+      out.push(arg);
+    }
+  }
+  return out;
 }
 
 function usage() {
@@ -913,8 +943,9 @@ async function board() {
     process.exit(2);
   }
 
+  const absoluteGoal = resolve(goal);
   const script = ensureLocalBoardSurface();
-  const scriptArgs = [script, "--goal", goal];
+  const scriptArgs = [script, "--goal", absoluteGoal];
   for (const option of ["--host", "--port"]) {
     const value = optionValue(option);
     if (value) scriptArgs.push(option, value);
@@ -945,7 +976,7 @@ async function prompt() {
   }
 
   const script = join(skillSource, "scripts", "render-task-prompt.mjs");
-  const scriptArgs = [script, ...args.slice(1)];
+  const scriptArgs = [script, ...resolveChildGoalArgs(args.slice(1))];
   const result = spawnSync(process.execPath, scriptArgs, {
     cwd: packageRoot,
     encoding: "utf8",
@@ -959,7 +990,7 @@ async function prompt() {
 
 async function parallelPlan() {
   const script = join(skillSource, "scripts", "parallel-plan.mjs");
-  const scriptArgs = [script, ...args.slice(1).filter((arg) => arg !== "--parallel-plan")];
+  const scriptArgs = [script, ...resolveChildGoalArgs(args.slice(1).filter((arg) => arg !== "--parallel-plan"))];
   const result = spawnSync(process.execPath, scriptArgs, {
     cwd: packageRoot,
     encoding: "utf8",
