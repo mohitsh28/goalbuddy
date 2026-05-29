@@ -38,6 +38,9 @@ test("Goal Prep invocation boundary keeps $goal-prep prepare-only", () => {
     assert.match(text, /Do you want the local GoalBuddy board for this goal\?/);
     assert.match(text, /Use the local GoalBuddy board as the default work surface/);
     assert.match(text, /start the local board before filling the task list/);
+    assert.match(text, /do not assume the existing process is stale and do not stop it/);
+    assert.match(text, /First check `http:\/\/127\.0\.0\.1:41737\/api\/boards`/);
+    assert.match(text, /shared multi-board hub/);
     assert.match(text, /Codex in-app Browser/);
     assert.match(text, /do not install a GoalBuddy catalog item/);
     assert.match(text, /Operator Escalation/);

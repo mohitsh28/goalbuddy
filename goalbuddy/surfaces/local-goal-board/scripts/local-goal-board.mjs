@@ -228,8 +228,7 @@ export async function startBoardServer(options = {}) {
 
       const route = routeBoardRequest(url.pathname, boards, initialBoard);
       if (!route.board) {
-        response.writeHead(404);
-        response.end("Not found");
+        sendUnregisteredBoardPath(response, url.pathname, boards, baseUrl);
         return;
       }
       if (route.pathname === "/api/board") {
@@ -398,6 +397,28 @@ function routeBoardRequest(pathname, boards, initialBoard) {
     .sort((left, right) => right.board.boardPath.length - left.board.boardPath.length);
 
   return matches[0] || { board: null, pathname };
+}
+
+function sendUnregisteredBoardPath(response, pathname, boards, baseUrl) {
+  response.writeHead(404, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  const registeredBoards = [...boards.values()].map((board) => {
+    const summary = boardSummary(board, baseUrl);
+    return `- ${summary.title}: ${summary.url}`;
+  });
+  response.end([
+    `GoalBuddy board path is not registered in this local hub: ${pathname}`,
+    "",
+    "This server is the GoalBuddy multi-board hub. Do not stop it just because a /<slug>/ board URL returned 404.",
+    "Start or rerun `npx goalbuddy board <goal-dir>` to register that goal on this same port, then open the printed /<slug>/ URL.",
+    "",
+    "Registered boards:",
+    registeredBoards.length ? registeredBoards.join("\n") : "- none",
+    "",
+    `Hub API: ${baseUrl}/api/boards`,
+  ].join("\n"));
 }
 
 function stripBoardPathPrefix(pathname, boardPath) {
