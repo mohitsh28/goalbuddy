@@ -34,6 +34,13 @@ function escapeRegExp(value) {
   return String(value).replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
+function receiptContractSchema(agentPath) {
+  const text = readFileSync(agentPath, "utf8");
+  const match = text.match(/\{\s*"goalbuddy_receipt_v1":\s*(\{[\s\S]*?\n\s*\})\s*\n\}/);
+  assert.ok(match, `missing goalbuddy_receipt_v1 contract in ${agentPath}`);
+  return JSON.parse(match[1]);
+}
+
 function fakeCodexBin(root, { loggedIn = true, goalsEnabled = true } = {}) {
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
@@ -288,6 +295,9 @@ checks:
     });
     assert.equal(report.task.id, "T002");
     assert.deepEqual(report.task.allowed_files, ["goalbuddy/scripts/**"]);
+    assert.equal(report.receipt_schema.task_id, "<T###>");
+    assert.equal(report.receipt_schema.board_path, "<path to state.yaml>");
+    assert.equal(report.receipt_schema.stopped_because, null);
     assert.equal(Object.hasOwn(report.receipt_schema, "needs_judge"), false);
     assert.equal(Object.hasOwn(report.receipt_schema, "next_allowed_task"), false);
     assert.equal(result.stdout.includes("A previous finding that should not force a full state dump."), false);
@@ -299,6 +309,81 @@ checks:
     assert.match(human.stdout, /After one wait_agent timeout/);
     assert.match(human.stdout, /goal_oracle/);
     assert.match(human.stdout, /slice_policy/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prompt receipt schemas mirror bundled agent receipt contracts", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const cases = [
+      {
+        type: "scout",
+        agent: "goal_scout",
+        assignee: "Scout",
+        extra: "",
+      },
+      {
+        type: "judge",
+        agent: "goal_judge",
+        assignee: "Judge",
+        extra: "",
+      },
+      {
+        type: "worker",
+        agent: "goal_worker",
+        assignee: "Worker",
+        extra: [
+          "    allowed_files:",
+          "      - goalbuddy/scripts/**",
+          "    verify:",
+          "      - npm test",
+          "    stop_if:",
+          "      - \"Need files outside allowed_files.\"",
+        ].join("\n"),
+      },
+    ];
+
+    for (const item of cases) {
+      const goal = join(root, item.type);
+      mkdirSync(goal, { recursive: true });
+      writeFileSync(join(goal, "state.yaml"), `version: 2
+goal:
+  title: "${item.type} prompt contract"
+  slug: "${item.type}-prompt-contract"
+  kind: specific
+  tranche: "Render ${item.type} prompt."
+  status: active
+  oracle:
+    signal: "Rendered prompt schema matches the bundled ${item.agent} receipt contract."
+    final_proof: "Receipt schema object matches the agent contract object."
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+active_task: T001
+tasks:
+  - id: T001
+    type: ${item.type}
+    assignee: ${item.assignee}
+    status: active
+    objective: "Render the ${item.type} task prompt."
+${item.extra ? `${item.extra}\n` : ""}    receipt: null
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
+`);
+
+      const result = runGoalMaker(["prompt", goal, "--json"]);
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      const report = JSON.parse(result.stdout);
+      const expectedSchema = receiptContractSchema(`goalbuddy/agents/${item.agent}.toml`);
+      assert.deepEqual(report.receipt_schema, expectedSchema, item.agent);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
