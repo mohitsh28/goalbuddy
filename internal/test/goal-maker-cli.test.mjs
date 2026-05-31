@@ -116,6 +116,37 @@ test("doctor fails when a required bundled agent is missing", () => {
   }
 });
 
+test("doctor distinguishes fully removed and residual-agent Codex states", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const codexHome = join(root, "codex-home");
+    const env = fakeCodexEnv(root);
+
+    const fullyRemoved = runGoalMaker(["doctor", "--codex-home", codexHome], { env });
+    assert.equal(fullyRemoved.status, 1, fullyRemoved.stderr || fullyRemoved.stdout);
+    const fullyRemovedReport = JSON.parse(fullyRemoved.stdout);
+    assert.equal(fullyRemovedReport.runtime_state, "fully-removed");
+    assert.deepEqual(fullyRemovedReport.installed_agents, []);
+    assert.deepEqual(fullyRemovedReport.residual_agents, []);
+    assert.deepEqual(fullyRemovedReport.missing_agents, []);
+    assert.match(fullyRemovedReport.errors.join("\n"), /fully removed/);
+
+    const agentsDir = join(codexHome, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, "goal_worker.toml"), readFileSync("goalbuddy/agents/goal_worker.toml", "utf8"));
+
+    const residual = runGoalMaker(["doctor", "--codex-home", codexHome], { env });
+    assert.equal(residual.status, 1, residual.stderr || residual.stdout);
+    const residualReport = JSON.parse(residual.stdout);
+    assert.equal(residualReport.runtime_state, "residual-agents-only");
+    assert.deepEqual(residualReport.residual_agents, ["goal_worker.toml"]);
+    assert.deepEqual(residualReport.missing_agents, ["goal_judge.toml", "goal_scout.toml"]);
+    assert.match(residualReport.errors.join("\n"), /Residual GoalBuddy Codex agents remain/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("doctor fails when a bundled agent is stale and update refreshes it", () => {
   const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
   try {

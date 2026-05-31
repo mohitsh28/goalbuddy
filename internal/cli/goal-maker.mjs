@@ -576,12 +576,24 @@ function doctor() {
   const agents = existsSync(agentsPath)
     ? readdirSync(agentsPath).filter((file) => file.startsWith("goal_") && file.endsWith(".toml"))
     : [];
-  const missingAgents = requiredAgentFiles.filter((file) => !agents.includes(file));
+  const installSurfacePresent = plugin.skill_installed || installed || legacyInstalled;
+  const residualAgents = installSurfacePresent ? [] : agents.filter((file) => requiredAgentFiles.includes(file));
+  const missingAgents = installSurfacePresent || residualAgents.length > 0
+    ? requiredAgentFiles.filter((file) => !agents.includes(file))
+    : [];
   const staleAgents = requiredAgentFiles.filter((file) => {
     const installedAgent = join(agentsPath, file);
     const bundledAgent = join(skillSource, "agents", file);
     if (!existsSync(installedAgent) || !existsSync(bundledAgent)) return false;
     return sha256(readFileSync(installedAgent)) !== sha256(readFileSync(bundledAgent));
+  });
+  const runtimeState = codexInstallState({
+    plugin,
+    installed,
+    legacyInstalled,
+    residualAgents,
+    missingAgents,
+    staleAgents,
   });
   const goalRuntime = codexGoalRuntimeStatus();
   const warnings = [];
@@ -589,7 +601,11 @@ function doctor() {
   if (!goalRuntime.ready) {
     warnings.push("native Codex /goal runtime is not ready; run `codex login` and `codex features enable goals` before using /goal.");
   }
-  if (!plugin.skill_installed && !installed) {
+  if (runtimeState === "fully-removed") {
+    errors.push("Codex GoalBuddy is fully removed; run `npx goalbuddy --target codex` to install.");
+  } else if (runtimeState === "residual-agents-only") {
+    errors.push(`Residual GoalBuddy Codex agents remain without plugin cache/config: ${residualAgents.join(", ")}; run a GoalBuddy reset/cleanup before treating it as removed.`);
+  } else if (!plugin.skill_installed && !installed) {
     errors.push("Codex GoalBuddy plugin is not installed; run `npx goalbuddy --target codex`.");
   }
   if (plugin.skill_installed && !plugin.enabled) {
@@ -621,7 +637,9 @@ function doctor() {
     skill_path: skillPath,
     compatibility_skill_installed: legacyInstalled,
     compatibility_skill_path: legacySkillPath,
+    runtime_state: runtimeState,
     installed_agents: agents,
+    residual_agents: residualAgents,
     missing_agents: missingAgents,
     stale_agents: staleAgents,
     goal_runtime: goalRuntime,
@@ -634,6 +652,20 @@ function doctor() {
   const installOk = (pluginOk || legacySkillOk) && missingAgents.length === 0 && staleAgents.length === 0;
   const goalReadyOk = !hasFlag("--goal-ready") || goalRuntime.ready;
   process.exit(installOk && goalReadyOk && errors.length === 0 ? 0 : 1);
+}
+
+function codexInstallState({ plugin, installed, legacyInstalled, residualAgents, missingAgents, staleAgents }) {
+  if (residualAgents.length > 0 && !plugin.skill_installed && !installed && !legacyInstalled) {
+    return "residual-agents-only";
+  }
+  if (!plugin.skill_installed && !installed && !legacyInstalled) {
+    return "fully-removed";
+  }
+  if (staleAgents.length > 0) return "stale-agents";
+  if (missingAgents.length > 0) return "incomplete";
+  if (plugin.skill_installed && !plugin.enabled) return "disabled";
+  if ((plugin.skill_installed && plugin.enabled) || installed) return "installed";
+  return "incomplete";
 }
 
 function checkUpdate() {
