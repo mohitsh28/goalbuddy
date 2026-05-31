@@ -35,6 +35,13 @@ function escapeRegExp(value) {
   return String(value).replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
 }
 
+function receiptContractSchema(agentPath) {
+  const text = readFileSync(agentPath, "utf8");
+  const match = text.match(/\{\s*"goalbuddy_receipt_v1":\s*(\{[\s\S]*?\n\s*\})\s*\n\}/);
+  assert.ok(match, `missing goalbuddy_receipt_v1 contract in ${agentPath}`);
+  return JSON.parse(match[1]);
+}
+
 function fakeCodexBin(root, { loggedIn = true, goalsEnabled = true } = {}) {
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
@@ -105,6 +112,37 @@ test("doctor fails when a required bundled agent is missing", () => {
     assert.equal(report.compatibility_skill_installed, false);
     assert.deepEqual(report.missing_agents, ["goal_worker.toml"]);
     assert.match(report.errors.join("\n"), /Missing GoalBuddy Codex agent: goal_worker\.toml/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("doctor distinguishes fully removed and residual-agent Codex states", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const codexHome = join(root, "codex-home");
+    const env = fakeCodexEnv(root);
+
+    const fullyRemoved = runGoalMaker(["doctor", "--codex-home", codexHome], { env });
+    assert.equal(fullyRemoved.status, 1, fullyRemoved.stderr || fullyRemoved.stdout);
+    const fullyRemovedReport = JSON.parse(fullyRemoved.stdout);
+    assert.equal(fullyRemovedReport.runtime_state, "fully-removed");
+    assert.deepEqual(fullyRemovedReport.installed_agents, []);
+    assert.deepEqual(fullyRemovedReport.residual_agents, []);
+    assert.deepEqual(fullyRemovedReport.missing_agents, []);
+    assert.match(fullyRemovedReport.errors.join("\n"), /fully removed/);
+
+    const agentsDir = join(codexHome, "agents");
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, "goal_worker.toml"), readFileSync("goalbuddy/agents/goal_worker.toml", "utf8"));
+
+    const residual = runGoalMaker(["doctor", "--codex-home", codexHome], { env });
+    assert.equal(residual.status, 1, residual.stderr || residual.stdout);
+    const residualReport = JSON.parse(residual.stdout);
+    assert.equal(residualReport.runtime_state, "residual-agents-only");
+    assert.deepEqual(residualReport.residual_agents, ["goal_worker.toml"]);
+    assert.deepEqual(residualReport.missing_agents, ["goal_judge.toml", "goal_scout.toml"]);
+    assert.match(residualReport.errors.join("\n"), /Residual GoalBuddy Codex agents remain/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -289,6 +327,9 @@ checks:
     });
     assert.equal(report.task.id, "T002");
     assert.deepEqual(report.task.allowed_files, ["goalbuddy/scripts/**"]);
+    assert.equal(report.receipt_schema.task_id, "<T###>");
+    assert.equal(report.receipt_schema.board_path, "<path to state.yaml>");
+    assert.equal(report.receipt_schema.stopped_because, null);
     assert.equal(Object.hasOwn(report.receipt_schema, "needs_judge"), false);
     assert.equal(Object.hasOwn(report.receipt_schema, "next_allowed_task"), false);
     assert.equal(result.stdout.includes("A previous finding that should not force a full state dump."), false);
@@ -362,6 +403,81 @@ checks:
       const report = JSON.parse(result.stdout);
       assert.equal(report.task.id, "T001", args.join(" "));
       assert.equal(report.metadata.board_path, join(realpathSync(goal), "state.yaml"));
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prompt receipt schemas mirror bundled agent receipt contracts", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const cases = [
+      {
+        type: "scout",
+        agent: "goal_scout",
+        assignee: "Scout",
+        extra: "",
+      },
+      {
+        type: "judge",
+        agent: "goal_judge",
+        assignee: "Judge",
+        extra: "",
+      },
+      {
+        type: "worker",
+        agent: "goal_worker",
+        assignee: "Worker",
+        extra: [
+          "    allowed_files:",
+          "      - goalbuddy/scripts/**",
+          "    verify:",
+          "      - npm test",
+          "    stop_if:",
+          "      - \"Need files outside allowed_files.\"",
+        ].join("\n"),
+      },
+    ];
+
+    for (const item of cases) {
+      const goal = join(root, item.type);
+      mkdirSync(goal, { recursive: true });
+      writeFileSync(join(goal, "state.yaml"), `version: 2
+goal:
+  title: "${item.type} prompt contract"
+  slug: "${item.type}-prompt-contract"
+  kind: specific
+  tranche: "Render ${item.type} prompt."
+  status: active
+  oracle:
+    signal: "Rendered prompt schema matches the bundled ${item.agent} receipt contract."
+    final_proof: "Receipt schema object matches the agent contract object."
+agents:
+  scout: installed
+  worker: installed
+  judge: installed
+active_task: T001
+tasks:
+  - id: T001
+    type: ${item.type}
+    assignee: ${item.assignee}
+    status: active
+    objective: "Render the ${item.type} task prompt."
+${item.extra ? `${item.extra}\n` : ""}    receipt: null
+checks:
+  dirty_fingerprint: unknown
+  last_verification:
+    result: unknown
+    task: null
+    commands: []
+`);
+
+      const result = runGoalMaker(["prompt", goal, "--json"]);
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      const report = JSON.parse(result.stdout);
+      const expectedSchema = receiptContractSchema(`goalbuddy/agents/${item.agent}.toml`);
+      assert.deepEqual(report.receipt_schema, expectedSchema, item.agent);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -756,6 +872,95 @@ test("plugin install removes stale personal Codex GoalBuddy skills", () => {
     assert.match(report.removed_legacy_skill_paths[1], pathSuffixPattern("skills", "goal-maker"));
     assert.equal(existsSync(staleSkill), false);
     assert.equal(existsSync(staleAlias), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reset removes only GoalBuddy-owned Codex runtime surfaces", () => {
+  const root = mkdtempSync(join(tmpdir(), "goal-maker-cli-test-"));
+  try {
+    const codexHome = join(root, "codex-home");
+    const configPath = join(codexHome, "config.toml");
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(configPath, [
+      '[plugins."goalbuddy@goalbuddy"]',
+      "enabled = true",
+      "",
+      '[plugins."goalbuddy@goalbuddy".settings]',
+      'token = "remove-me"',
+      "",
+      '[plugins."github@openai-curated"]',
+      "enabled = true",
+      "",
+      "[marketplaces.goalbuddy]",
+      'source = "tolibear/goalbuddy"',
+      'source_type = "git"',
+      "",
+      "[marketplaces.goalbuddy.settings]",
+      'token = "remove-me-too"',
+      "",
+      "[marketplaces.other]",
+      'source = "openai/curated"',
+      "",
+    ].join("\n"));
+
+    const cacheRoot = join(codexHome, "plugins", "cache", "goalbuddy", "goalbuddy", packageVersion);
+    mkdirSync(cacheRoot, { recursive: true });
+    writeFileSync(join(cacheRoot, "sentinel.txt"), "cached\n");
+
+    const agentsRoot = join(codexHome, "agents");
+    mkdirSync(agentsRoot, { recursive: true });
+    for (const file of ["goal_judge.toml", "goal_scout.toml", "other.toml"]) {
+      writeFileSync(join(agentsRoot, file), `${file}\n`);
+    }
+    mkdirSync(join(agentsRoot, "goal_worker.toml"), { recursive: true });
+    writeFileSync(join(agentsRoot, "goal_worker.toml", "sentinel.txt"), "corrupt agent path\n");
+
+    const staleSkill = join(codexHome, "skills", "goalbuddy");
+    const staleAlias = join(codexHome, "skills", "goal-maker");
+    mkdirSync(staleSkill, { recursive: true });
+    mkdirSync(staleAlias, { recursive: true });
+    writeFileSync(join(staleSkill, "SKILL.md"), "stale GoalBuddy skill\n");
+    writeFileSync(join(staleAlias, "SKILL.md"), "stale Goal Maker alias\n");
+
+    const reset = runGoalMaker(["reset", "--target", "codex", "--codex-home", codexHome, "--json"]);
+    assert.equal(reset.status, 0, reset.stderr || reset.stdout);
+    const report = JSON.parse(reset.stdout);
+    assert.deepEqual(report.removed_config_sections, [
+      '[plugins."goalbuddy@goalbuddy"]',
+      "[marketplaces.goalbuddy]",
+    ]);
+    assert.match(report.removed_plugin_cache_paths[0], pathSuffixPattern("plugins", "cache", "goalbuddy"));
+    assert.equal(report.removed_agents.length, 3);
+    assert.equal(report.removed_legacy_skill_paths.length, 2);
+
+    const config = readFileSync(configPath, "utf8");
+    assert.doesNotMatch(config, /goalbuddy@goalbuddy/);
+    assert.doesNotMatch(config, /\[marketplaces\.goalbuddy\]/);
+    assert.doesNotMatch(config, /remove-me/);
+    assert.doesNotMatch(config, /remove-me-too/);
+    assert.match(config, /\[plugins\."github@openai-curated"\]/);
+    assert.match(config, /\[marketplaces\.other\]/);
+    assert.equal(existsSync(join(codexHome, "plugins", "cache", "goalbuddy")), false);
+    assert.equal(existsSync(join(agentsRoot, "goal_worker.toml")), false);
+    assert.equal(existsSync(join(agentsRoot, "other.toml")), true);
+    assert.equal(existsSync(staleSkill), false);
+    assert.equal(existsSync(staleAlias), false);
+
+    const secondReset = runGoalMaker(["reset", "--codex-home", codexHome, "--json"]);
+    assert.equal(secondReset.status, 0, secondReset.stderr || secondReset.stdout);
+    const secondReport = JSON.parse(secondReset.stdout);
+    assert.deepEqual(secondReport.removed_config_sections, []);
+    assert.deepEqual(secondReport.removed_plugin_cache_paths, []);
+    assert.deepEqual(secondReport.removed_agents, []);
+    assert.deepEqual(secondReport.removed_legacy_skill_paths, []);
+
+    const doctor = runGoalMaker(["doctor", "--codex-home", codexHome], { env: fakeCodexEnv(root) });
+    assert.equal(doctor.status, 1, doctor.stderr || doctor.stdout);
+    const doctorReport = JSON.parse(doctor.stdout);
+    assert.deepEqual(doctorReport.installed_agents, []);
+    assert.deepEqual(doctorReport.stale_agents, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -237,29 +237,43 @@ function receiptSchema(role) {
   if (role === "worker") {
     return {
       result: "done | blocked",
+      task_id: "<T###>",
+      board_path: "<path to state.yaml>",
       changed_files: [],
-      commands: [{ cmd: "<command>", status: "pass | fail | not_run" }],
-      summary: "<=120 words",
+      commands: [],
+      summary: "<=120 words>",
       remaining_blockers: [],
+      verification_attempts: 1,
+      stopped_because: null,
     };
   }
   if (role === "judge") {
     return {
       result: "done | blocked",
+      task_id: "<T###>",
+      board_path: "<path to state.yaml>",
       decision: "approved | rejected | approve_subgoal | reject_subgoal | not_complete | complete",
       full_outcome_complete: false,
+      rationale: "<=120 words>",
       evidence: [],
+      subgoal_contract: null,
+      parallel_safety: null,
       blocked_tasks: [],
+      missing_evidence: [],
       required_board_updates: [],
     };
   }
   return {
     result: "done | blocked",
-    summary: "<=120 words",
+    task_id: "<T###>",
+    board_path: "<path to state.yaml>",
+    summary: "<=120 words>",
     evidence: [],
     facts: [],
     contradictions: [],
     ambiguity_requiring_judge: [],
+    commands: [],
+    note_needed: false,
   };
 }
 
