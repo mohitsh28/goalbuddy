@@ -9,6 +9,7 @@
   },
   "files": [
     ".agents/plugins/marketplace.json",
+    ".claude-plugin/marketplace.json",
     "CHANGELOG.md",
     "README.md",
     "CONTRIBUTING.md",

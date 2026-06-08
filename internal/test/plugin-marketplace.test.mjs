@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 const marketplace = JSON.parse(readFileSync(".agents/plugins/marketplace.json", "utf8"));
+const claudeMarketplace = JSON.parse(readFileSync(".claude-plugin/marketplace.json", "utf8"));
 const plugin = JSON.parse(readFileSync("plugins/goalbuddy/.codex-plugin/plugin.json", "utf8"));
 const claudePlugin = JSON.parse(readFileSync("plugins/goalbuddy/.claude-plugin/plugin.json", "utf8"));
 
@@ -18,6 +19,17 @@ test("GoalBuddy plugin is exposed through a Codex marketplace manifest", () => {
   assert.equal(entry.source.path, "./plugins/goalbuddy");
   assert.equal(entry.policy.installation, "INSTALLED_BY_DEFAULT");
   assert.equal(entry.category, "Coding");
+});
+
+test("GoalBuddy plugin is exposed through a Claude marketplace manifest", () => {
+  assert.equal(claudeMarketplace.name, "goalbuddy");
+  assert.equal(claudeMarketplace.owner.name, "tolibear");
+  assert.equal(claudeMarketplace.plugins.length, 1);
+
+  const [entry] = claudeMarketplace.plugins;
+  assert.equal(entry.name, "goalbuddy");
+  assert.equal(entry.source, "./plugins/goalbuddy");
+  assert.ok(pkg.files.includes(".claude-plugin/marketplace.json"));
 });
 
 test("GoalBuddy plugin metadata tracks the package release", () => {

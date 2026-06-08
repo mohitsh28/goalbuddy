@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "goalbuddy",
+  "owner": {
+    "name": "tolibear",
+    "email": "support@tolibear.com"
+  },
+  "description": "GoalBuddy /goal-prep skill plus Scout/Judge/Worker subagents for pressured /goal runs.",
+  "plugins": [
+    {
+      "name": "goalbuddy",
+      "source": "./plugins/goalbuddy",
+      "description": "GoalBuddy: turn broad work into pressured /goal runs with oracles, local boards, receipts, and verification."
+    }
+  ]
+}
